@@ -276,7 +276,131 @@ def parse_arguments(params: Optional[Tuple] = None) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    import cv2
+    import os
+    import threading
+    from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel
+    from PyQt5.QtGui import QFont
+    from PyQt5.QtCore import Qt
+    import sys
+
     args = parse_arguments()
     conf = OmegaConf.load(args.config)
+
+    # Создаём и запускаем runner в отдельном потоке
     runner = Runner(conf.model_path, conf, args.mp, args.verbose, args.length)
-    runner.run()
+    t = threading.Thread(target=runner.run, daemon=True)
+    t.start()
+
+    # Словарь соответствий: слово -> имя видеофайла
+    WORD_TO_VIDEO = {
+        "привет": r"C:\Users\user\PycharmProjects\Recognized\videos\f17a6060-6ced-4bd1-9886-8578cfbb864f.mp4",
+        "пока": r"C:\Users\user\PycharmProjects\Recognized\videos\093e939c-322d-4f7d-9436-0da0d1f6cbc1.mp4",
+        "да": r"C:\Users\user\PycharmProjects\Recognized\videos\60ec20bb-8e73-4e16-9074-12a7bb61e356.mp4",
+        "нет": r"C:\Users\user\PycharmProjects\Recognized\videos\ef1c4543-82f8-4e23-ab90-a39d82f1feb6.mp4",
+        "благодарность": r"C:\Users\user\PycharmProjects\Recognized\videos\8f9e396b-3334-42ff-951a-8e5719284912.mp4"
+    }
+
+    # Теперь запускаем GUI
+    class GestureApp(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.setWindowTitle("Gesture Interface")
+            self.setStyleSheet("background-color: #121212; color: white;")
+            self.setGeometry(100, 100, 800, 600)
+            self.setFont(QFont("Arial", 12))
+
+            self.init_ui()
+
+        def play_video(self, word):
+            filename = WORD_TO_VIDEO.get(word)
+            if not filename:
+                print(f"Слово '{word}' не поддерживается.")
+                return
+
+            video_path = os.path.join("videos", filename)
+            if not os.path.isfile(video_path):
+                print(f"Видео файл '{video_path}' не найден.")
+                return
+
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                print(f"Не удалось открыть видео: {video_path}")
+                return
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                cv2.imshow(f"Жест: {word}", frame)
+                if cv2.waitKey(30) & 0xFF == ord('q'):  # нажми 'q' чтобы закрыть
+                    break
+
+            cap.release()
+            cv2.destroyAllWindows()
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                cv2.imshow(f"Жест: {word}", frame)
+                if cv2.waitKey(30) & 0xFF == ord('q'):  # нажми 'q' чтобы выйти раньше
+                    break
+
+            cap.release()
+            cv2.destroyAllWindows()
+
+        def init_ui(self):
+            layout = QVBoxLayout()
+
+            self.input_field = QTextEdit()
+            self.input_field.setPlaceholderText("Введите текст для жестов...")
+            self.input_field.setStyleSheet("background-color: #1e1e1e; border-radius: 10px; padding: 10px;")
+            layout.addWidget(self.input_field)
+
+            self.output_field = QLabel("Распознанный текст будет здесь")
+            self.output_field.setStyleSheet("background-color: #1e1e1e; border-radius: 10px; padding: 10px;")
+            self.output_field.setAlignment(Qt.AlignTop)
+            layout.addWidget(self.output_field)
+
+            self.show_btn = QPushButton("Показать жесты")
+            self.show_btn.setStyleSheet("background-color: #3a3a3a; border-radius: 10px;")
+            layout.addWidget(self.show_btn)
+
+            self.stop_btn = QPushButton("Стоп")
+            self.stop_btn.setStyleSheet("background-color: #5a2a2a; border-radius: 10px;")
+            layout.addWidget(self.stop_btn)
+
+            self.reset_btn = QPushButton("Сброс")
+            self.reset_btn.setStyleSheet("background-color: #2a5a2a; border-radius: 10px;")
+            layout.addWidget(self.reset_btn)
+
+            # Пример: обновляем текст при распознавании
+            def update_output():
+                from time import sleep
+                while True:
+                    if hasattr(runner, "prediction_list"):
+                        text = " ".join(runner.prediction_list)
+                        self.output_field.setText(text)
+                    sleep(0.5)
+
+            threading.Thread(target=update_output, daemon=True).start()
+
+            def on_show_gesture():
+                word = self.input_field.toPlainText().strip().lower()
+                self.play_video(word)
+
+            self.show_btn.clicked.connect(on_show_gesture)
+
+            self.show_btn.clicked.connect(on_show_gesture)
+            self.stop_btn.clicked.connect(lambda: print("Остановка..."))
+            self.reset_btn.clicked.connect(lambda: self.input_field.clear())
+
+            self.setLayout(layout)
+
+    app = QApplication(sys.argv)
+    window = GestureApp()
+    window.show()
+    sys.exit(app.exec_())
